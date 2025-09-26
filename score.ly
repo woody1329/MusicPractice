@@ -10,26 +10,25 @@ color = #(define-music-function (parser location color) (string?) #{
     
 \header { } 
 \score  { 
- \new Voice { \new Voice { c' 4  
-                d' 4  
-                e' 4  
-                f' 4  
-                g' 4  
-                a' 4  
-                b' 4  
-                c'' 4  
-                 } 
-               
  
-           } 
-         
+      << \new Staff  = ybaycfeddyyya { c' 4  
+             d' 4  
+             e' 4  
+             f' 4  
+             g' 4  
+             a' 4  
+             b' 4  
+             c'' 4  
+              } 
+            
  
+        >>
+      
   } 
  
 \paper { }
 \layout {
   \context {
-    \RemoveEmptyStaffContext
     \override VerticalAxisGroup #'remove-first = ##t
   }
  }
