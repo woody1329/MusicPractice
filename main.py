@@ -5,9 +5,9 @@ from music21 import stream, note, tempo
 import subprocess
 import threading
 import time
-import pygame
 import fluidsynth
 import os
+import xml.etree.ElementTree as ET
 from music21 import environment
 from pathlib import Path
 from music21 import environment
@@ -19,7 +19,8 @@ env['lilypondPath'] = r"C:\Program Files (x86)\LilyPond\bin\lilypond.exe"
 # -----------------------
 SOUNDFONT = "./FluidR3_GM.sf2"   # <-- update this to your .sf2 file
 BPM_DEFAULT = 80
-
+HIGHLIGHT_WIDTH = 5
+HIGHLIGHT_HEIGHT = 5
 programs = {
     "C Major Scale": {
         "notes": ["C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5"],
@@ -141,8 +142,10 @@ import subprocess
 from music21 import stream, note, tempo
 from pathlib import Path
 SOUNDFONT_FILE = Path.cwd() / "GeneralUser-GS.sf2"
-def generate_score_png(notes, bpm, filename="score"):
-    # Create the score
+
+
+def generate_score_files(notes, bpm, filename="score", workdir="C:/Users/Woody/Work2025/MusicPractice"):
+   #     # Create the score
     s = stream.Score()
     p = stream.Part()
     p.append(tempo.MetronomeMark(number=bpm))
@@ -157,25 +160,69 @@ def generate_score_png(notes, bpm, filename="score"):
     ly_lines = Path(ly_path).read_text(encoding="utf-8").splitlines()
     clean_lines = [l for l in ly_lines if "RemoveEmptyStaffContext" not in l]
     Path(ly_path).write_text("\n".join(clean_lines), encoding="utf-8")
+    #Ensure path is Path object
+    #ly_path = Path(ly_path)
 
-    # Run LilyPond to generate PNG
+    # Output prefix (without extension)
+    output_prefix = Path(workdir) / filename
+
+    # 1. Generate PNG
     subprocess.run([
         "lilypond",
         "-fpng",
-        "-o", filename,  # output prefix
-        ly_path
-    ], cwd="C:/Users/Woody/Work2025/MusicPractice", check=True)
-    print(os.listdir("."))
-    # LilyPond names pages like filename-1.png, filename-2.png...
-    png_file = Path(f"{filename}.png")
-    png_file = Path(f"{filename}.png").resolve()
-    print('png ile path: ', png_file)
-    if not png_file.exists():
-        raise FileNotFoundError(f"LilyPond did not produce {png_file}")
-    return str(png_file)
+        "-o", str(output_prefix),
+        str(ly_path)
+    ], cwd=workdir, check=True)
+
+    # 2. Generate SVG
+    subprocess.run([
+        "lilypond",
+        "-dbackend=svg",
+        "-o", str(output_prefix),
+        str(ly_path)
+    ], cwd=workdir, check=True)
+
+    # LilyPond usually appends "-1" for the first page
+    png_file = output_prefix.with_name(f"{filename}.png")
+    svg_file = output_prefix.with_name(f"{filename}.svg")
+
+    return png_file, svg_file
+
+# def generate_score_png(notes, bpm, filename="score"):
+#     # Create the score
+#     s = stream.Score()
+#     p = stream.Part()
+#     p.append(tempo.MetronomeMark(number=bpm))
+#     for n in notes:
+#         p.append(note.Note(n, quarterLength=1))
+#     s.append(p)
+
+#     # Write LilyPond file
+#     ly_path = s.write("lilypond", fp=f"{filename}.ly")
+
+#     # Clean problematic lines
+#     ly_lines = Path(ly_path).read_text(encoding="utf-8").splitlines()
+#     clean_lines = [l for l in ly_lines if "RemoveEmptyStaffContext" not in l]
+#     Path(ly_path).write_text("\n".join(clean_lines), encoding="utf-8")
+
+#     # Run LilyPond to generate PNG
+#     subprocess.run([
+#         "lilypond",
+#         "-fpng",
+#         "-o", filename,  # output prefix
+#         ly_path
+#     ], cwd="C:/Users/Woody/Work2025/MusicPractice", check=True)
+#     print(os.listdir("."))
+#     # LilyPond names pages like filename-1.png, filename-2.png...
+#     png_file = Path(f"{filename}.png")
+#     png_file = Path(f"{filename}.png").resolve()
+#     print('png ile path: ', png_file)
+#     if not png_file.exists():
+#         raise FileNotFoundError(f"LilyPond did not produce {png_file}")
+#     return str(png_file)
 
 # -----------------------
-# AUDIO PLAYBACK
+# Note MAPPING
 # -----------------------
 # def play_program(notes, bpm):
 #     # Init pygame mixer for metronome
@@ -208,6 +255,30 @@ def generate_score_png(notes, bpm, filename="score"):
 
 #     fs.delete()
 
+def estimate_notehead_positions(notes):
+    coords = []
+    start = [(30,30)]
+    coords.append(start[0])
+    for i in range(1, len(notes)):
+        coords.append((start[0][0] + i*20, start[0][1]))
+    return coords
+
+
+def map_notes_to_positions(notes, svg_file):
+    positions = estimate_notehead_positions(notes)
+
+    # Trim or pad so both lists align
+    length = min(len(notes), len(positions))
+    mapping = []
+    for i in range(length):
+        mapping.append({
+            "note": notes[i],
+            "x": positions[i][0],
+            "y": positions[i][1]
+        })
+    print('mapping:  ', mapping)
+    return mapping
+
 # -----------------------
 # GUI
 # -----------------------
@@ -215,15 +286,26 @@ class PracticeApp:
     def __init__(self, master):
         self.master = master
         master.title("Practice Companion")
+        self.canvas = tk.Canvas(master, width=800, height=400)
+        self.canvas.pack(pady=10)
+                # Matplotlib figure for the score
+        self.fig, self.ax = plt.subplots(figsize=(8,2))
+        # self.canvas = FigureCanvasTkAgg(self.fig, master)
+        # self.canvas.get_tk_widget().pack(pady=10)
 
+
+        # draw the image inside the canvas
+        #self.canvas_img = self.canvas.create_image(0, 0, anchor="nw", image=self.tk_img)
+        
         # Dropdown
         self.program_var = StringVar(value=list(programs.keys())[0])
+        self.update_score(self.program_var.get())
         self.dropdown = OptionMenu(master, self.program_var, *programs.keys(), command=self.update_score)
         self.dropdown.pack(pady=10)
 
         # Score image
-        self.label = Label(master)
-        self.label.pack(pady=10)
+        # self.label = Label(master)
+        # self.label.pack(pady=10)
         # Repeat count dropdown
         self.repeat_var = StringVar(value="1")
         self.repeat_dropdown = OptionMenu(master, self.repeat_var, *map(str, range(1, 11)))
@@ -241,24 +323,44 @@ class PracticeApp:
         self.tempo_slider.set(120)  # default tempo
         self.tempo_slider.pack(pady=10)
         
-        self.update_score(self.program_var.get())
+        
         self.play_thread = None
         self.play_stop_event = threading.Event()
+        self.note_positions = []  # to hold note-position mapping
         
     def update_score(self, program_name="C Major Scale"):
         notes = programs[program_name]["notes"]
         bpm = programs[program_name].get("tempo", BPM_DEFAULT)
-        png_file = generate_score_png(notes, bpm)
+        png_file, svg_file = generate_score_files(notes, bpm)
+        self.note_positions = map_notes_to_positions(notes, svg_file)
+        print('update_score:  ', self.note_positions, len(self.note_positions))
+        # load the PNG as before
         img = Image.open(png_file)
-        img = Image.open(png_file)
+        
         bbox = ImageChops.invert(img.convert("L")).getbbox()  # find non-white content
         if bbox:
             img = img.crop(bbox)
         #img.thumbnail((600, 200)) 
         self.tk_img = ImageTk.PhotoImage(img)
-        self.label.config(image=self.tk_img)
-        self.label.image =self.tk_img  # critical
+        self.canvas_img = self.canvas.create_image(0, 0, anchor="nw", image=self.tk_img)
+        #self.tk_img = ImageTk.PhotoImage(img)
+        #self.label.config(image=self.tk_img)
+        #self.label.image =self.tk_img  # critical
 
+
+    def highlight_note_entry(self, entry):
+        # Clear previous highlight
+        self.canvas.delete("highlight")
+
+        x, y = entry['x'], entry['y']
+
+        x1 = x - HIGHLIGHT_WIDTH // 2
+        y1 = y - HIGHLIGHT_HEIGHT // 2
+        x2 = x + HIGHLIGHT_WIDTH // 2
+        y2 = y + HIGHLIGHT_HEIGHT // 2
+
+        # Draw rectangle around the specific note occurrence
+        self.canvas.create_rectangle(x1, y1, x2, y2, outline="red", width=2, tags="highlight")
     # def start_play(self):
     #     # Run playback in a separate thread so GUI stays responsive
     #     threading.Thread(target=self.play_program_with_metronome, daemon=True).start()
@@ -303,7 +405,7 @@ class PracticeApp:
         fs = fluidsynth.Synth()
         fs.start(driver="dsound")
         sfid = fs.sfload(str(SOUNDFONT_FILE))
-        
+        print("lengths: ",len(self.note_positions), len(notes))
         # Instrument on channel 0
         fs.program_select(0, sfid, 0, 0)
         # Metronome click on channel 1 (any high pitch note)
@@ -318,8 +420,10 @@ class PracticeApp:
                 fs.noteoff(1, 84)
                 time.sleep(beat_duration - 0.05)
             for _ in range(repeat):
-                for n in notes:
+                for i,n in enumerate(notes):
                     midi_num = note.Note(n).pitch.midi
+                    print('position:::', i, self.note_positions[i])
+                    self.highlight_note_entry(self.note_positions[i])
                     fs.noteon(0, midi_num, 120)  # play note
                     
                     # Play metronome click at start of beat
@@ -335,6 +439,7 @@ class PracticeApp:
                 time.sleep(pause_between_repeats)
         finally:
             fs.delete()
+            self.canvas.delete("highlight")
 
 # -----------------------
 # RUN APP

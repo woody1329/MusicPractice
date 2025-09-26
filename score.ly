@@ -11,7 +11,7 @@ color = #(define-music-function (parser location color) (string?) #{
 \header { } 
 \score  { 
  
-      << \new Staff  = ybaycfeddyyya { c' 4  
+      << \new Staff  = yxxwzcbwdfzye { c' 4  
              d' 4  
              e' 4  
              f' 4  
